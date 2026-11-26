@@ -23,6 +23,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y incus
           sudo incus admin init --auto --storage-backend dir
+          # The hosted runner's container firewall can drop forwarded guest traffic.
+          sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
+          sudo iptables -I FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
           sudo incus launch images:debian/12 kr-test -c security.nesting=true
           sudo incus exec kr-test -- systemctl is-system-running --wait || true
           sudo incus exec kr-test -- mkdir /src
