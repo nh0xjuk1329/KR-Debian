@@ -1,0 +1,25 @@
+[Unit]
+Description=KR-Debian signed client updates
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+DynamicUser=true
+StateDirectory=kr-debian-updates
+WorkingDirectory=/var/lib/kr-debian-updates
+Environment=SPRK_SERVICE_MODE=updates PORT=8081 SPRK_HTTP_BIND=127.0.0.1
+Environment=SPRK_UPDATES_DIR=/var/lib/kr-debian-updates
+Environment=SPRK_ILLUSTRATION_MODELS_DIR=/opt/kr-debian/current/models
+Environment=SPRK_UPDATES_GITHUB_REPO=faberuser/sprk
+Environment=SPRK_UPDATES_PUBLIC_KEY_FILE=/opt/kr-debian/current/client-update-public.pem
+EnvironmentFile=/opt/kr-debian/current/client.env
+ExecStart=/opt/kr-debian/current/bin/sprk-server
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

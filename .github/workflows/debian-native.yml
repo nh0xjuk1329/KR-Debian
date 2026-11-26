@@ -1,0 +1,55 @@
+name: Native Debian hosting
+on:
+  workflow_dispatch:
+  push:
+    branches: [debian]
+    paths:
+      - 'deploy/debian/**'
+      - 'server/**'
+      - 'Cargo.*'
+      - '.github/workflows/debian-native.yml'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Boot an isolated Bookworm system for the installation test
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y incus
+          sudo incus admin init --auto --storage-backend dir
+          sudo incus launch images:debian/12 kr-test -c security.nesting=true
+          sudo incus exec kr-test -- systemctl is-system-running --wait || true
+          sudo incus exec kr-test -- mkdir /src
+          git archive HEAD | sudo incus exec -T kr-test -- tar -xf - -C /src
+      - name: Build and install from the checkout
+        run: |
+          sudo incus exec kr-test -- bash /src/deploy/debian/dependencies.sh
+          sudo incus exec kr-test -- useradd -m builder
+          sudo incus exec kr-test -- chown -R builder:builder /src
+          sudo incus exec kr-test -- runuser -u builder -- bash -ec '
+            curl -fsSLo /tmp/rustup.sh https://sh.rustup.rs
+            sh /tmp/rustup.sh -y --profile minimal --default-toolchain 1.99.0
+            source "$HOME/.cargo/env"
+            bash /src/deploy/debian/build.sh /src/artifacts/release
+          '
+          sudo incus exec kr-test -- bash /src/deploy/debian/install.sh /src/artifacts/release
+      - name: Check game discovery, signed updates, battle readiness and a database backup
+        run: |
+          sudo incus exec kr-test -- bash -euc '
+            curl -fsS http://127.0.0.1:8080/host.json | grep -F KR-Debian
+            curl -fsS http://127.0.0.1:8080/health/battle
+            curl -fsS http://127.0.0.1:8081/updates/stable/manifest.json -o /tmp/manifest.json
+            cd /src
+            python3 -c "from pathlib import Path; from client.scripts.release.client_update_bundle import verified_manifest; print(verified_manifest(Path(\"/tmp/manifest.json\").read_bytes(), Path(\"config/client-update-public.pem\"))[\"version\"])"
+            systemctl start kr-debian-backup
+            pg_restore --list /var/lib/kr-debian-backups/*.dump >/dev/null
+          '
+      - name: Service diagnostics
+        if: failure()
+        run: sudo incus exec kr-test -- journalctl -u kr-debian-game -u kr-debian-updates -u kr-debian-backup -n 60 --no-pager

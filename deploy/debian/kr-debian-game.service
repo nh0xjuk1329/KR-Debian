@@ -1,0 +1,32 @@
+[Unit]
+Description=KR-Debian game and battle worker
+Requires=postgresql@18-main.service
+After=postgresql@18-main.service network.target
+
+[Service]
+User=kr-debian
+Group=kr-debian
+StateDirectory=kr-debian
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/kr-debian
+Environment=HOME=/var/lib/kr-debian
+Environment=SPRK_SERVICE_MODE=game PORT=8080 SPRK_HTTP_BIND=127.0.0.1
+Environment=SERVER_NAME=KR-Debian SERVER_HOST=127.0.0.1:8080 SERVER_HTTPS=false
+Environment=GAME_TABLES_PATH=/opt/kr-debian/current/tables
+Environment=SPRK_SERVER_BINARY=/opt/kr-debian/current/bin/sprk-server
+Environment=BATTLE_WORKER_EXECUTABLE=/opt/kr-debian/current/bin/sprk-battle-worker
+Environment=BATTLE_SERVICE_KEY_FILE=/var/lib/kr-debian/battle.key
+Environment=WINEPREFIX=/var/lib/kr-debian/wine SPRK_WORKER_DIR=/opt/kr-debian/current/worker
+EnvironmentFile=/etc/kr-debian/database.env
+EnvironmentFile=-/etc/kr-debian/game.env
+ExecStart=/opt/kr-debian/current/bin/sprk-entrypoint
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

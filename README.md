@@ -1,4 +1,14 @@
-# SPRK
+# KR-Debian
+
+Host your own King's Raid server on an x86-64 Debian 12 machine. The game and
+update services run under systemd, PostgreSQL 18 stores player progress, and
+Wine64 runs the headless Unity battle worker. The Windows launcher connects to
+your server. Docker is optional.
+
+**[Install KR-Debian and connect your Windows client](deploy/debian/README.md)**
+
+This fork follows [Faber's SPRK project](https://github.com/faberuser/sprk).
+The `debian` branch contains the native hosting setup.
 
 A private server for a real-time RPG mobile game, with the game's client code
 maintained as source. This repository holds both halves:
@@ -30,12 +40,13 @@ This project is for educational and preservation purposes only.
 
 | You want to…                           | Read                                                                | You need to install        |
 | -------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
+| Host KR-Debian on Linux                | [Native Debian installation](deploy/debian/README.md)               | Debian 12 amd64, systemd   |
 | Play on your own PC                    | [Play on your own computer](#play-on-your-own-computer)             | Docker Desktop             |
 | Run a server for friends or the public | [Host a server for other players](#host-a-server-for-other-players) | Docker on a Linux machine  |
 | Change the server or the game          | [Contributing](#contributing)                                       | Rust, .NET, Python, Docker |
 
-Players never build anything: the server comes as a ready-made Docker image and
-the game updates itself through its launcher.
+The following sections describe upstream's Docker setup. Both hosting options
+use the Windows launcher for client updates.
 
 ## Play on your own computer
 

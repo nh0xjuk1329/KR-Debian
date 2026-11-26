@@ -64,7 +64,11 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let bind_ip: std::net::IpAddr = std::env::var("SPRK_HTTP_BIND")
+        .unwrap_or_else(|_| "0.0.0.0".into())
+        .parse()
+        .context("SPRK_HTTP_BIND must be an IPv4 or IPv6 address")?;
+    let addr = SocketAddr::new(bind_ip, port);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("Server listening on http://{}", listener.local_addr()?);
     axum::serve(listener, app)

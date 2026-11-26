@@ -20,4 +20,4 @@ case "${SPRK_SERVICE_MODE:-game}" in
     export BATTLE_WORKER_EXECUTABLE="${BATTLE_WORKER_EXECUTABLE:-/usr/local/bin/sprk-battle-worker}"
     ;;
 esac
-exec /usr/local/bin/sprk-server "$@"
+exec "${SPRK_SERVER_BINARY:-/usr/local/bin/sprk-server}" "$@"
