@@ -25,27 +25,53 @@ struct Scheduler {
     active: Arc<Mutex<HashSet<(i64, i64)>>>,
 }
 
-pub(crate) fn start(s: AppState) {
-    let scheduler = Scheduler::new();
+pub(crate) fn start(s: AppState) -> anyhow::Result<()> {
+    let available = std::thread::available_parallelism()?.get();
+    let configured = std::env::var("SPRK_DISPATCH_CONCURRENCY").ok();
+    let slots = dispatch_slots(configured.as_deref(), available)?;
+    tracing::info!(slots, "Dispatch simulation slots");
+    let scheduler = Scheduler::new(slots);
     crate::database::spawn_labelled("task:dispatch-scan", async move {
         loop {
-            if let Err(error) = scheduler.scan(&s).await {
-                tracing::warn!(%error,"Dispatch preparation will retry");
+            let retry_seconds = match scheduler.scan(&s).await {
+                Ok(false) => 30,
+                Ok(true) => 3,
+                Err(error) => {
+                    tracing::warn!(%error,"Dispatch preparation will retry");
+                    3
+                }
+            };
+            // Start newly committed jobs immediately. The periodic scan still
+            // recovers unfinished jobs after a disconnect or process restart.
+            tokio::select! {
+                _ = s.conquest.dispatch_started.notified() => {},
+                _ = tokio::time::sleep(std::time::Duration::from_secs(retry_seconds)) => {},
             }
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     });
+    Ok(())
+}
+
+fn dispatch_slots(setting: Option<&str>, available: usize) -> anyhow::Result<usize> {
+    let Some(raw) = setting else { return Ok(available.clamp(1, CONCURRENCY)); };
+    raw.parse::<usize>().ok().filter(|n| (1..=CONCURRENCY).contains(n))
+        .ok_or_else(|| anyhow::anyhow!("SPRK_DISPATCH_CONCURRENCY must be an integer from 1 to {CONCURRENCY}"))
 }
 
 impl Scheduler {
-    fn new() -> Self {
-        Self { slots: Arc::new(Semaphore::new(CONCURRENCY)), active: Arc::default() }
+    fn new(slots: usize) -> Self {
+        Self { slots: Arc::new(Semaphore::new(slots)), active: Arc::default() }
     }
 
     /// Start a task for each pending job that does not already have one.
-    async fn scan(&self, s: &AppState) -> Result<()> {
+    async fn scan(&self, s: &AppState) -> Result<bool> {
+        if !s.conquest.worker.read().await.as_ref()
+            .is_some_and(|w| w.dispatch_version >= 1 && !w.sender.is_closed()) {
+            return Ok(false);
+        }
         let jobs: Vec<(i64,i64)> = crate::db::query_as(sqlx::AssertSqlSafe(format!("SELECT account,idx FROM battle_state WHERE {} ORDER BY account,idx", crate::api::battle::PENDING_DISPATCH_SIMULATION)))
             .fetch_all(&s.db).await?;
+        let pending = !jobs.is_empty();
         for job in jobs {
             if !self.active.lock().unwrap_or_else(|e| e.into_inner()).insert(job) {
                 continue;
@@ -53,7 +79,7 @@ impl Scheduler {
             let (scheduler, s) = (self.clone(), s.clone());
             crate::database::spawn_labelled("task:dispatch-preparation", async move { scheduler.run(&s, job).await });
         }
-        Ok(())
+        Ok(pending)
     }
 
     /// Keep preparing while results are saved. Any other outcome (no worker,
@@ -257,7 +283,11 @@ pub(super) async fn packet(s: &AppState, worker: &str, name: &str, body: &Value)
         return Err(rule("Unauthorized"));
     }
     if name == "WorkerResult" {
-        if !body["Win"].is_boolean() || !(0..=3600000).contains(&number(body, "TimeMs")) {
+        let elapsed = body["TimeMs"].as_i64()
+            .or_else(|| body["TimeMs"].as_str().and_then(|s| s.parse::<i64>().ok()));
+        if !body["Win"].is_boolean()
+            || !elapsed.is_some_and(|ms| (0..=3_600_000).contains(&ms))
+        {
             return Err(rule("InvalidValue"));
         }
         #[cfg(test)]
@@ -282,6 +312,34 @@ pub(super) async fn packet(s: &AppState, worker: &str, name: &str, body: &Value)
 mod tests {
     use super::*;
     use crate::api::battle::tests::{account, call, setup};
+
+    #[test]
+    fn dispatch_slots_follow_the_cpu_budget_and_reject_invalid_limits() {
+        assert_eq!(dispatch_slots(None, 2).unwrap(), 2);
+        assert_eq!(dispatch_slots(None, 16).unwrap(), 4);
+        assert_eq!(dispatch_slots(Some("1"), 4).unwrap(), 1);
+        for invalid in ["", "0", "5", "-1"] {
+            assert!(dispatch_slots(Some(invalid), 4).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_requires_a_typed_result_from_the_assigned_worker() {
+        let (s, _) = setup().await;
+        let (reply, mut response) = oneshot::channel();
+        let id = "dispatch:test-job:0";
+        s.conquest.dispatch.lock().await.insert(id.into(), Pending {
+            worker: "assigned".into(), reply: Some(reply),
+        });
+        for invalid in [Value::Null, json!("invalid"), json!(-1), json!(3_600_001)] {
+            assert!(packet(&s, "assigned", "WorkerResult", &json!({"RunId":id,"Win":true,"TimeMs":invalid})).await.is_err());
+        }
+        let result = json!({"RunId":id,"Win":true,"TimeMs":1000});
+        assert!(packet(&s, "other", "WorkerResult", &result).await.is_err());
+        assert!(matches!(response.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        packet(&s, "assigned", "WorkerResult", &result).await.unwrap();
+        assert_eq!(response.await.unwrap(), result);
+    }
 
     async fn job() -> (AppState, Value, Value) {
         let (s, u) = setup().await;
@@ -431,7 +489,7 @@ mod tests {
             id: "dispatch-test".into(), sender: tx,
             arena_version: 1, challenge_version: 1, dispatch_version: 1,
         });
-        Scheduler::new().scan(&s).await.unwrap();
+        Scheduler::new(CONCURRENCY).scan(&s).await.unwrap();
         let mut ids = Vec::new();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while ids.len() < 4 {
@@ -492,7 +550,7 @@ mod tests {
                 if name == "WorkerPrepare" { break body["RunId"].as_str().unwrap().to_owned(); }
             }
         }
-        let scheduler = Scheduler::new();
+        let scheduler = Scheduler::new(CONCURRENCY);
         scheduler.scan(&s).await.unwrap();
         let mut prepared = HashSet::new();
         let wait = std::time::Duration::from_secs(5);

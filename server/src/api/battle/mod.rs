@@ -91,6 +91,12 @@ pub(crate) async fn execute_request(s: &AppState, path: &str, body: Bytes) -> Re
         .map(|(key, _)| key.as_str()).collect();
     let mut req = Request::parse_with_arrays(&body, &array_fields)?;
     let a = req.account(s)?;
+    if path == "dispatch/get_dispatch_list" {
+        let mut db = s.reads.acquire().await?;
+        let mut out = response(s, path);
+        out["DispatchBattleInfos"] = json!(dispatch::snapshot(&mut db, a, s.battle_service_key.is_some()).await?);
+        return Ok(out);
+    }
     if let Some(fields) = s
         .tables
         .battle
@@ -177,6 +183,9 @@ pub(crate) async fn execute_request(s: &AppState, path: &str, body: Bytes) -> Re
                 None
             };
             tx.commit().await?;
+            if path == "dispatch/start_dispatch" {
+                s.conquest.dispatch_started.notify_one();
+            }
             if let (Some(revision), Some(key)) = (synced, req.0.get("SessionKey").or(req.0.get("SessionId"))) {
                 item_level::remember(s, key, revision);
             }
@@ -519,7 +528,7 @@ pub(crate) async fn login_in(tx: &mut PgConnection, s: &AppState, a: i64) -> Res
     }
     out["DungeonInfos"] = json!(progress);
     out["BattleKeyResults"] = dungeons::key_snapshot(&mut tx, s, a).await?;
-    out["DispatchBattleInfos"] = json!(dispatch::snapshot(&mut tx, a).await?);
+    out["DispatchBattleInfos"] = json!(dispatch::snapshot(&mut tx, a, s.battle_service_key.is_some()).await?);
     let mut top_clears = list(&mut tx, a, "top_clear").await?;
     // JM_NShared_TopClearDungeonInfo uses ParseEnum, which only accepts text.
     // Sending the stored numeric type makes every clear appear to be None.

@@ -67,6 +67,22 @@ code updates. Use a full client with its game assets for this setup.
 
 ## Customize and maintain
 
+### Limit CPU use
+
+To give the game and its Wine battle worker a combined allowance of two CPU
+cores, run `sudo systemctl set-property kr-debian-game.service CPUQuota=200%`.
+Use `400%` for four cores or clear the cap with `CPUQuota=`.
+PostgreSQL and the update service run separately. On a
+VM, the virtual CPU count sets the limit for the entire guest.
+
+Set `SPRK_DISPATCH_CONCURRENCY=2` in `/etc/kr-debian/game.env` and restart
+`kr-debian-game` to allow two background dispatch simulations at a time. This
+setting accepts 1–4. By default the server uses the CPU parallelism available
+to the process, up to four slots. Fewer slots can reserve capacity for player
+requests while lengthening the wait for dispatch preparation.
+
+### Operations
+
 - **Server name.** Set `SERVER_NAME="My King's Raid"` in
   `/etc/kr-debian/game.env`, then run `sudo systemctl restart kr-debian-game`.
   For access through a public HTTPS reverse proxy, set `SERVER_HOST` and

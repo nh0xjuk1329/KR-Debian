@@ -27,6 +27,7 @@ type Sender=mpsc::Sender<Packet>;
 struct Worker {id:String,sender:Sender,arena_version:i64,challenge_version:i64,dispatch_version:i64}
 struct Peer {id:String,run:String,sender:Sender}
 pub(crate) struct BattleHub {
+    pub(super) dispatch_started: tokio::sync::Notify,
     worker:RwLock<Option<Worker>>,
     dispatch:Mutex<std::collections::HashMap<String,dispatch_worker::Pending>>,
     peers:DashMap<i64,Peer>,
@@ -37,7 +38,7 @@ pub(crate) struct BattleHub {
     pub address:String,
 }
 impl Default for BattleHub {
-    fn default()->Self {Self{worker:RwLock::new(None),dispatch:Mutex::new(std::collections::HashMap::new()),peers:DashMap::new(),disconnects:DashMap::new(),heartbeats:DashMap::new(),runs:DashMap::new(),
+    fn default()->Self {Self{dispatch_started:tokio::sync::Notify::new(),worker:RwLock::new(None),dispatch:Mutex::new(std::collections::HashMap::new()),peers:DashMap::new(),disconnects:DashMap::new(),heartbeats:DashMap::new(),runs:DashMap::new(),
         port:std::env::var("BATTLE_PORT").ok().and_then(|v|v.parse().ok()).unwrap_or(9002),
         address:crate::websocket::public_url("battle")}}
 }
@@ -332,6 +333,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
                         let mut active=s.conquest.worker.write().await;
                         if active.is_some() {return Err(rule("AlreadyOnBattleHero"));}
                         *active=Some(Worker{id:connection_id.clone(),sender:tx.clone(),arena_version:number(&body,"ArenaVersion"),challenge_version:number(&body,"ChallengeRaidVersion"),dispatch_version:number(&body,"DispatchVersion")});worker=true;
+                        s.conquest.dispatch_started.notify_one();
                         tracing::info!(arena_version=number(&body,"ArenaVersion"), challenge_raid_version=number(&body,"ChallengeRaidVersion"), "Native battle worker authenticated");
                         tx.send(("WorkerLoginRes".into(),json!({"Result":"Success"}))).await.map_err(|_|rule("InvalidValue"))?;
                     } else if name=="BattleLoginReq" {

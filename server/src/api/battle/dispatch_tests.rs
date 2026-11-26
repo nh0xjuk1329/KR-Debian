@@ -60,7 +60,7 @@ async fn offline_dispatch_overdue_estimate_refreshes_without_fabricating_results
 }
 
 #[tokio::test]
-async fn dispatch_polling_writes_only_when_progress_changes() {
+async fn dispatch_polling_projects_progress_without_writing_the_job() {
     let (s,u)=fixture(true).await;let a=account(&u);
     let before:i64=crate::database::row_changes(&s.db).await;
     assert!(call(&s,&u,"dispatch/get_dispatch_list","").await["DispatchBattleInfos"].as_array().unwrap().is_empty());
@@ -69,15 +69,43 @@ async fn dispatch_polling_writes_only_when_progress_changes() {
     let mut saved=job.clone();saved["SimulationResults"]=json!([{"Outcome":1,"TimeMs":60000}]);
     saved["State"]=json!("Battle");saved["StartTimestamp"]=json!(now()+60);saved["FinishTimestamp"]=json!(now()+120);
     put(&mut s.db.acquire().await.unwrap(),a,"dispatch",slot,&saved).await.unwrap();
-    call(&s,&u,"dispatch/get_dispatch_list","").await; // normalize derived state once
     let before:i64=crate::database::row_changes(&s.db).await;
     for _ in 0..3 {call(&s,&u,"dispatch/get_dispatch_list","").await;}
     assert_eq!(crate::database::row_changes(&s.db).await,before);
     let mut saved=get(&mut s.db.acquire().await.unwrap(),a,"dispatch",slot).await.unwrap();
     saved["StartTimestamp"]=json!(now()-300);saved["FinishTimestamp"]=json!(now()-1);
     put(&mut s.db.acquire().await.unwrap(),a,"dispatch",slot,&saved).await.unwrap();
+    let before = crate::database::row_changes(&s.db).await;
     let response=call(&s,&u,"dispatch/get_dispatch_list","").await;
     assert_eq!(response["DispatchBattleInfos"][0]["WinCount"],1);
+    assert_eq!(crate::database::row_changes(&s.db).await, before);
+    assert_eq!(get(&mut s.db.acquire().await.unwrap(),a,"dispatch",slot).await.unwrap(),saved);
+}
+
+#[tokio::test]
+async fn worker_owned_legacy_jobs_show_only_revealed_results_and_reject_client_settlement() {
+    let (mut s, user) = fixture(true).await;
+    s.battle_service_key = std::sync::Arc::new(Some("local-test-worker-credential".repeat(2)));
+    let account = account(&user);
+    let mut saved = start(&s, &user, 3).await;
+    let slot = n(&saved, "SlotIndex");
+    saved["SimulationVersion"] = json!(1);
+    saved["State"] = json!("Battle");
+    saved["StartTimestamp"] = json!(now() - 2);
+    saved["FinishTimestamp"] = json!(now() + 120);
+    saved["SimulationResults"] = json!([{"Outcome":1,"TimeMs":1000},{"Outcome":0,"TimeMs":60000}]);
+    put(&mut s.db.acquire().await.unwrap(),account,"dispatch",slot,&saved).await.unwrap();
+
+    let listed = call(&s, &user, "dispatch/get_dispatch_list", "").await;
+    let job = &listed["DispatchBattleInfos"][0];
+    assert_eq!(job["SimulationVersion"], 2);
+    assert_eq!(job["ServerResult"], "1");
+    for private in ["SimulationResults", "Request", "EntryCostHold", "SkillRules"] {
+        assert!(job.get(private).is_none());
+    }
+    let incoming = report(&saved, &[1, 1, 1]);
+    assert_ne!(call(&s, &user, "dispatch/complete_calculate_dispatch_result", &incoming).await["Result"], "Success");
+    assert_eq!(get(&mut s.db.acquire().await.unwrap(),account,"dispatch",slot).await.unwrap(),saved);
 }
 #[tokio::test]
 async fn technomagic_dispatch_preserves_entry_gates_and_charges_and_rewards_only_wins() {

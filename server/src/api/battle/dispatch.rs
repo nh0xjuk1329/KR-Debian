@@ -74,7 +74,7 @@ fn advance(info: &mut Value, stamp: i64) {
         info["FinishTimestamp"] = json!(stamp + remaining);
         info["CompleteTime"] = json!(time(stamp + remaining));
     }
-    let Some(results) = info["SimulationResults"].as_array().cloned() else {
+    let Some(results) = info["SimulationResults"].as_array() else {
         return;
     };
     if matches!(info["State"].as_str(), Some("Complete" | "Cancel")) {
@@ -97,9 +97,10 @@ fn advance(info: &mut Value, stamp: i64) {
         .iter()
         .filter(|v| n(v, "Outcome") == 1)
         .count();
+    let revealed = result_string(&results[..completed]);
     info["WinCount"] = json!(wins);
     info["LoseCount"] = json!(completed - wins);
-    info["ServerResult"] = json!(result_string(&results[..completed]));
+    info["ServerResult"] = json!(revealed);
     info["State"] = json!(if completed == n(info, "RepeatCount") as usize {
         "ReadyToComplete"
     } else {
@@ -169,21 +170,23 @@ async fn simulation_result(db: &mut PgConnection, a: i64, r: &Request) -> Result
     put(db, a, "dispatch", slot, &info).await?;
     Ok(json!({"DispatchInfo":info}))
 }
-pub(super) async fn snapshot(db: &mut PgConnection, a: i64) -> Result<Vec<Value>> {
+pub(super) async fn snapshot(db: &mut PgConnection, a: i64, worker_owned: bool) -> Result<Vec<Value>> {
     let mut runs = list(db, a, "dispatch").await?;
     // Native clients reserve every hero present in this snapshot, regardless of
     // state. Keep terminal records in storage for duplicate-request protection.
     runs.retain(|run| !matches!(run["State"].as_str(), Some("Complete" | "Cancel")));
+    let stamp = now();
     for run in &mut runs {
+        if worker_owned && run["SimulationVersion"] == 1 {
+            // Existing jobs are resumed by the worker. Tell older clients to
+            // render their progress instead of spending CPU simulating them.
+            run["SimulationVersion"] = json!(2);
+            run["ClientResult"] = Value::Null;
+        }
         if n(run, "SimulationVersion") >= 1 {
-            let previous = run.clone();
-            advance(run, now());
-            if *run != previous {
-                put(db, a, "dispatch", n(run, "SlotIndex"), run).await?;
-            }
-        } else if run["State"] == "Battle" && n(run, "FinishTimestamp") <= now() {
+            advance(run, stamp);
+        } else if run["State"] == "Battle" && n(run, "FinishTimestamp") <= stamp {
             run["State"] = json!("ReadyToComplete");
-            put(db, a, "dispatch", n(run, "SlotIndex"), run).await?;
         }
         // Server-only: the worker's battle snapshot (~100 KB per job), and the
         // settlement reply that earlier builds stored (up to 2.9 MB; dropped by
@@ -192,6 +195,13 @@ pub(super) async fn snapshot(db: &mut PgConnection, a: i64) -> Result<Vec<Value>
         if let Some(run) = run.as_object_mut() {
             run.remove("SimulationSnapshot");
             run.remove("CollectionResponse");
+            // The Windows client uses per-fight samples only to resume version 1
+            // simulations. Version 2 displays the server's revealed counts and clock.
+            if run.get("SimulationVersion").and_then(Value::as_i64) == Some(2) {
+                for private in ["SimulationResults", "Request", "EntryCostHold", "SkillRules"] {
+                    run.remove(private);
+                }
+            }
         }
     }
     Ok(runs)
@@ -203,14 +213,16 @@ pub(super) async fn execute(
     r: &Request,
     action: &str,
 ) -> Result<Value> {
-    if action == "get_dispatch_list" {
-        return Ok(json!({"DispatchBattleInfos":snapshot(db,a).await?}));
-    }
     if action == "complete_calculate_dispatch_result" {
         if !r.text("SimulationJobId").is_empty() {
+            // Authority belongs to the configured worker even while it is
+            // disconnected and even for a job written by an older server.
+            if s.battle_service_key.is_some() {
+                return Err(rule("InvalidValue"));
+            }
             return simulation_result(db, a, r).await;
         }
-        let next = snapshot(db, a)
+        let next = snapshot(db, a, s.battle_service_key.is_some())
             .await?
             .into_iter()
             .find(|v| v["State"] == "ReadyToComplete");

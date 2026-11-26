@@ -1703,7 +1703,7 @@ async fn abandoned_karma_releases_party_for_godking_without_refund_or_rewards() 
             .unwrap(),
             items
         );
-        assert!(dispatch::snapshot(&mut s.db.acquire().await.unwrap(), a)
+        assert!(dispatch::snapshot(&mut s.db.acquire().await.unwrap(), a, s.battle_service_key.is_some())
             .await
             .unwrap()
             .is_empty());
