@@ -5,7 +5,11 @@ for a Rust release build, Unity worker, client updates, and database backups.
 Players use the full Windows client. The server runs with PostgreSQL 18 and
 uses a signed upstream client release pinned in `client-release`.
 
-## Install
+## One-command install
+
+From the repository root run `bash run.sh`. The starter installs the native dependencies and starts the services. On a public IPv4 VPS it also sets up HTTPS for Eternal Fantasy - SEA. Allow inbound TCP 80 and 443. If the host has a private interface behind NAT, forward those ports and run `bash run.sh start YOUR_PUBLIC_IPV4`. The starter prints the game and update URLs to use in your launcher.
+
+## Manual install
 
 From a regular login with sudo access:
 

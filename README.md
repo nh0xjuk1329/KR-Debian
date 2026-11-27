@@ -1,9 +1,19 @@
 # KR-Debian
 
-Host your own King's Raid server on an x86-64 Debian 12 machine. The game and
-update services run under systemd, PostgreSQL 18 stores player progress, and
-Wine64 runs the headless Unity battle worker. The Windows launcher connects to
-your server. Docker is optional.
+Run this checkout on Windows x64 or Debian 12 amd64. Both use the same Rust server, game tables, PostgreSQL migrations and pinned client release.
+
+| Platform | Start | Stop |
+| --- | --- | --- |
+| Windows 10/11 x64 | Double-click **run.bat** | Run `run.bat stop` or press Ctrl+C in its console |
+| Debian 12 amd64 | `bash run.sh` | `bash run.sh stop` |
+
+**Windows.** The first start needs internet access. It locates or installs Python, the Visual Studio C++ build tools, Git and Rust, builds the server, and prepares PostgreSQL 18 and the signed Unity worker. Missing system tools use Windows Package Manager and may show an installer permission prompt. Open Eternal Launcher and select **Local**. Game discovery, updates and accounts use loopback port 8180. PostgreSQL listens on loopback port 54320. The server prints its data and log folder under `%LOCALAPPDATA%\KR-Debian\servers`. Start from the same checkout path to use the same database.
+
+**Debian VPS.** Allow inbound TCP 80 and 443 in your provider firewall, then run `bash run.sh` from the checkout as root or a user with sudo. The first start installs dependencies, builds the server and starts PostgreSQL, the battle worker, game and updates. When the outbound interface has a public IPv4 address, the starter configures nginx and a renewable Let's Encrypt certificate for `<IP>.sslip.io`. It checks game discovery and the update manifest over HTTPS and prints both launcher URLs for **Eternal Fantasy - SEA**. Database and backend HTTP ports stay on loopback or local sockets.
+
+If your VPS uses NAT, forward TCP 80 and 443 to the VPS and run `bash run.sh start YOUR_PUBLIC_IPV4`. The starter remembers the address. Run the same command with the new address if it changes. On a private VM without a supplied public IP, the game and updates stay available on loopback ports 8080 and 8081. After changing server code, use `bash run.sh rebuild`.
+
+The Windows starter prepares an asset library on first run when a full `sprk-client` or `Kings Raid Eternal` folder is beside the checkout. This requires space for another copy of the patch assets. The player downloads missing files from Local, and the battle worker audio is muted. Without a full client, the starter advertises KRInfo's hosted assets. Debian also defaults to that hosted asset URL. Operators can set `SPRK_ASSETS_CDN_URL` to their own asset service.
 
 **[Install KR-Debian and connect your Windows client](deploy/debian/README.md)**
 

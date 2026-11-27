@@ -12,6 +12,7 @@ WorkingDirectory=/var/lib/kr-debian
 Environment=HOME=/var/lib/kr-debian
 Environment=SPRK_SERVICE_MODE=game PORT=8080 SPRK_HTTP_BIND=127.0.0.1
 Environment=SERVER_NAME=KR-Debian SERVER_HOST=127.0.0.1:8080 SERVER_HTTPS=false
+Environment=SPRK_ASSETS_CDN_URL=https://updates.krinfo.net/updates/assets/
 Environment=GAME_TABLES_PATH=/opt/kr-debian/current/tables
 Environment=SPRK_SERVER_BINARY=/opt/kr-debian/current/bin/sprk-server
 Environment=BATTLE_WORKER_EXECUTABLE=/opt/kr-debian/current/bin/sprk-battle-worker

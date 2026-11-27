@@ -7,7 +7,7 @@ if [[ $EUID != 0 || $ID != debian || $VERSION_ID != 12 || $(dpkg --print-archite
 fi
 apt-get update
 apt-get install -y --no-install-recommends build-essential cmake pkg-config perl \
-    ca-certificates curl openssl python3 wine64 xvfb xauth fonts-liberation \
+    ca-certificates curl git openssl python3 wine64 xvfb xauth fonts-liberation \
     postgresql-common gnupg
 if ! apt-cache show postgresql-18 >/dev/null 2>&1; then
     /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y

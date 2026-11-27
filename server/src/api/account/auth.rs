@@ -182,6 +182,8 @@ pub async fn change_password(State(state): State<AppState>, Json(body): Json<Cha
 }
 
 pub async fn register(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Json<TokenResponse>> {
+    let policy = std::env::var("SPRK_ALLOW_REGISTRATION").ok();
+    check_registration_policy(policy.as_deref())?;
     let username = validate(&body)?;
     throttle(&state.db, &username).await?;
     let permit = PASSWORD_WORK.try_acquire().map_err(|_| ServerError::Authentication("Server busy. Please try again.".into()))?;
@@ -203,6 +205,23 @@ pub async fn register(State(state): State<AppState>, Json(body): Json<Credential
     // Existing save rows remain unchanged. New game data is created by the normal game login.
     tx.commit().await?;
     Ok(Json(issue(&state.db, &login_id).await?))
+}
+
+fn check_registration_policy(value: Option<&str>) -> Result<()> {
+    if value.is_none_or(|v| v == "1" || v.eq_ignore_ascii_case("true")) {
+        return Ok(());
+    }
+    Err(ServerError::InvalidRequest("New account registration is closed on this server.".into()))
+}
+
+#[test]
+fn registration_policy_defaults_open_and_closes_on_invalid_configuration() {
+    for value in [None, Some("1"), Some("true")] {
+        assert!(check_registration_policy(value).is_ok());
+    }
+    for value in ["false", "0", "", "invalid"] {
+        assert!(check_registration_policy(Some(value)).is_err());
+    }
 }
 
 pub async fn password_login(State(state): State<AppState>, Json(body): Json<Credentials>) -> Result<Json<TokenResponse>> {
