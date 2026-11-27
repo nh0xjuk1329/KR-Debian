@@ -10397,15 +10397,6 @@
       "ItemCount": 1
     },
     {
-      "Index": 50001002,
-      "Category": "Ruby",
-      "ProductName": "1,000 Rubies",
-      "Gem": 1000,
-      "PriceType": "Gold",
-      "Price": 10000000,
-      "IconPath": "Icon/Item/PACKAGE_PAY_ALLINONE"
-    },
-    {
       "Index": 50000002,
       "Category": "Stamina",
       "ProductName": "Full Stamina Potion",

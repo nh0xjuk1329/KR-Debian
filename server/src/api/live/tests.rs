@@ -84,7 +84,8 @@ async fn recovered_shop_is_delivered_to_native_lobby_with_readable_prices_and_it
             assert!(n(grant, "ItemCount") > 0);
         }
     }
-    for category in ["Beginner", "BirthDay", "Booster", "Convenience", "Daily", "Equipment", "Event", "Gold", "Growth", "HotNew", "Lua", "Mileage", "Package", "Return", "Ruby", "Stamina", "Technomagic"] {
+    assert!(!indices.contains(&50001002));
+    for category in ["Beginner", "BirthDay", "Booster", "Convenience", "Daily", "Equipment", "Event", "Gold", "Growth", "HotNew", "Lua", "Mileage", "Package", "Return", "Stamina", "Technomagic"] {
         assert!(products.iter().any(|p| p["Category"] == category), "Missing category {category}");
     }
     let token = products.iter().find(|p| p["Category"] == "Lua").unwrap();
@@ -298,19 +299,18 @@ async fn special_shop_currency_exchange_batches_charge_and_grant_exact_totals() 
     let gold = balance(&s, &u, "gold").await;
     let gems = balance(&s, &u, "gem").await;
     let rubies = call(&s, &u, "shop/buy_payshop_product", "Index=50001002&Quantity=3").await;
-    ok(&rubies);
-    assert_eq!(rubies["PlayerProductPurchaseInfo"]["PurchasedCount"], 3);
-    assert_eq!(balance(&s, &u, "gold").await, gold - 30000000);
-    assert_eq!(balance(&s, &u, "gem").await, gems + 3000);
+    assert_ne!(rubies["Result"], "Success");
+    assert_eq!(balance(&s, &u, "gold").await, gold);
+    assert_eq!(balance(&s, &u, "gem").await, gems);
     let coins = call(&s, &u, "shop/buy_payshop_product", "Index=50001001&Quantity=4").await;
     ok(&coins);
     assert_eq!(coins["PlayerProductPurchaseInfo"]["PurchasedCount"], 4);
-    assert_eq!(balance(&s, &u, "gold").await, gold - 26000000);
-    assert_eq!(balance(&s, &u, "gem").await, gems - 1000);
-    let rejected = call(&s, &u, "shop/buy_payshop_product", "Index=50001002&Quantity=8").await;
+    assert_eq!(balance(&s, &u, "gold").await, gold + 4000000);
+    assert_eq!(balance(&s, &u, "gem").await, gems - 4000);
+    let rejected = call(&s, &u, "shop/buy_payshop_product", "Index=50001001&Quantity=100").await;
     assert_ne!(rejected["Result"], "Success");
-    assert_eq!(balance(&s, &u, "gold").await, gold - 26000000);
-    assert_eq!(balance(&s, &u, "gem").await, gems - 1000);
+    assert_eq!(balance(&s, &u, "gold").await, gold + 4000000);
+    assert_eq!(balance(&s, &u, "gem").await, gems - 4000);
 }
 
 #[tokio::test]
@@ -344,13 +344,6 @@ async fn recovered_shop_purchases_are_atomic_limited_and_restore_after_reset() {
     crate::db::query("UPDATE user_info SET gem=0 WHERE account_id=$1").bind(a).execute(&s.db).await.unwrap();
     assert_ne!(call(&s, &u, "shop/buy_payshop_product", "Index=3093003").await["Result"], "Success");
     assert!(get(&mut s.db.acquire().await.unwrap(), a, "product", 3093003).await.unwrap().is_null());
-    let before_gold = balance(&s, &u, "gold").await;
-    ok(&call(&s, &u, "shop/buy_payshop_product", "Index=50001002").await);
-    assert_eq!(balance(&s, &u, "gold").await, before_gold - 10000000);
-    assert_eq!(balance(&s, &u, "gem").await, 1000);
-    ok(&call(&s, &u, "shop/buy_payshop_product", "Index=50001001").await);
-    assert_eq!(balance(&s, &u, "gold").await, before_gold - 9000000);
-    assert_eq!(balance(&s, &u, "gem").await, 0);
 }
 async fn seed(s: &AppState, u: &Value, id: i32, count: i32) {
     crate::db::query("INSERT INTO items(account_id,item_index,count) VALUES($1,$2,$3) ON CONFLICT(account_id,item_index) DO UPDATE SET count=items.count+excluded.count").bind(account(u)).bind(id).bind(count).execute(&s.db).await.unwrap();

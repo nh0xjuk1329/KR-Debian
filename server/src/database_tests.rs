@@ -32,6 +32,9 @@ async fn read_pool_serves_routed_reads_and_rejects_writes() {
     let list = api::community::mail::get_mail_list(State(s.clone()), form("MaxCount=10")).await.unwrap().0;
     // Personal mail: the welcome mail plus the one just sent (global excluded).
     assert_eq!(list["MailInfos"].as_array().unwrap().len(), 2, "{list}");
+    let welcome = list["MailInfos"].as_array().unwrap().iter().find(|m| m["Title"] == "Welcome to King's Raid!").unwrap();
+    assert_eq!((welcome["SendGold"].as_i64(), welcome["SendGem"].as_i64(), welcome["SendChicken"].as_i64()),
+               (Some(10_000_000), Some(10_000), Some(10_000)));
     assert!(list["MailInfos"].as_array().unwrap().iter().any(|m| m["Title"] == "Reader"), "{list}");
 
     for value in [
